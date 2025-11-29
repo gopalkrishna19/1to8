@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>The Eight Numbers</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -14,7 +14,7 @@
             background-color: #e0e5ec;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             overflow: hidden;
-            /* Prevent scrolling if possible */
+            touch-action: none;
         }
 
         /* Neumorphism Utilities */
@@ -46,6 +46,11 @@
         .glow-red {
             box-shadow: 0 0 15px #ef4444, inset 0 0 10px #ef4444;
             border: 2px solid #ef4444;
+        }
+
+        .glow-blue {
+            box-shadow: 0 0 15px #3b82f6, inset 0 0 10px #3b82f6;
+            border: 2px solid #3b82f6;
         }
 
         /* Tooltip Animation */
@@ -84,13 +89,6 @@
         const { useState, useEffect, useRef } = React;
 
         // --- Configuration ---
-        // Graph Layout: 
-        // A(0)
-        // B(1) C(2) D(3)
-        // E(4) F(5) G(6)
-        // H(7)
-
-        // Coordinates (percent)
         const NODES = [
             { id: 0, x: 50, y: 10, label: 'A' },
             { id: 1, x: 20, y: 35, label: 'B' },
@@ -101,16 +99,6 @@
             { id: 6, x: 80, y: 65, label: 'G' },
             { id: 7, x: 50, y: 90, label: 'H' },
         ];
-
-        // Adjacency List (Based on "Two central nodes connected to 6 others" hypothesis)
-        // 0(A) connects to: 1(B), 2(C), 3(D)
-        // 1(B) connects to: 0(A), 2(C), 4(E), 5(F)
-        // 2(C) connects to: 0(A), 1(B), 3(D), 4(E), 5(F), 6(G)  <-- Central 1
-        // 3(D) connects to: 0(A), 2(C), 5(F), 6(G)
-        // 4(E) connects to: 1(B), 2(C), 5(F), 7(H)
-        // 5(F) connects to: 1(B), 2(C), 3(D), 4(E), 6(G), 7(H)  <-- Central 2
-        // 6(G) connects to: 2(C), 3(D), 5(F), 7(H)
-        // 7(H) connects to: 4(E), 5(F), 6(G)
 
         const CONNECTIONS = [
             [1, 2, 3],          // 0
@@ -126,15 +114,16 @@
         const NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
         function App() {
-            const [board, setBoard] = useState(Array(8).fill(null)); // nodeId -> number
+            const [board, setBoard] = useState(Array(8).fill(null));
             const [availableNumbers, setAvailableNumbers] = useState(NUMBERS);
             const [startTime, setStartTime] = useState(null);
             const [endTime, setEndTime] = useState(null);
             const [isWon, setIsWon] = useState(false);
             const [tooltip, setTooltip] = useState({ show: false, text: '', x: 0, y: 0 });
             const [draggedNumber, setDraggedNumber] = useState(null);
-            const [hoveredNode, setHoveredNode] = useState(null); // { id, isValid }
+            const [hoveredNode, setHoveredNode] = useState(null);
             const [history, setHistory] = useState([]);
+            const [selectedNumber, setSelectedNumber] = useState(null); // For mobile tap interaction
 
             useEffect(() => {
                 setStartTime(Date.now());
@@ -147,7 +136,6 @@
             }, [board]);
 
             const checkWin = () => {
-                // Double check validity (though we prevent invalid moves)
                 let valid = true;
                 for (let i = 0; i < 8; i++) {
                     if (!checkNodeValidity(i, board[i], board)) {
@@ -191,7 +179,6 @@
                     addToHistory();
                     const newBoard = [...board];
 
-                    // If number is moved from another node, clear previous position
                     const existingIdx = newBoard.indexOf(number);
                     if (existingIdx !== -1) {
                         newBoard[existingIdx] = null;
@@ -199,8 +186,9 @@
 
                     newBoard[nodeId] = number;
                     setBoard(newBoard);
+                    setSelectedNumber(null); // Clear selection after placement
                 } else {
-                    // Should not happen via drop if we prevent it visually, but good safety
+                    // Show error feedback
                 }
                 setHoveredNode(null);
             };
@@ -220,32 +208,16 @@
 
                 const key = parseInt(e.key);
                 if (NUMBERS.includes(key)) {
-                    // Check if number is already used elsewhere?
-                    // Usually in these games, each number is used once.
-                    // If used elsewhere, maybe move it here?
-                    // Let's assume unique numbers.
-                    if (board.includes(key) && board[nodeId] !== key) {
-                        // Number used elsewhere. 
-                        // Optional: Flash "Already used" or move it.
-                        // Let's just allow moving it for better UX.
-                    }
-
                     const check = checkNodeValidity(nodeId, key, board);
                     if (check.valid) {
                         addToHistory();
                         const newBoard = [...board];
-                        // Remove key from other position if exists
                         const existingIdx = newBoard.indexOf(key);
                         if (existingIdx !== -1) newBoard[existingIdx] = null;
 
                         newBoard[nodeId] = key;
                         setBoard(newBoard);
                     } else {
-                        // Show tooltip
-                        const node = NODES[nodeId];
-                        // Calculate screen position for tooltip? 
-                        // Or just relative to the node.
-                        // We can use a fixed overlay or absolute pos.
                         showTooltip(`Too close to ${check.conflict}!`, e.target.getBoundingClientRect());
                     }
                 }
@@ -261,18 +233,42 @@
                 setTimeout(() => setTooltip({ ...tooltip, show: false }), 2000);
             };
 
+            // Mobile: Tap to select number from pool or node
+            const handleNumberClick = (num) => {
+                if (isWon) return;
+                const isUsed = board.includes(num);
+                if (!isUsed) {
+                    setSelectedNumber(num);
+                }
+            };
+
+            // Mobile: Tap node to place selected number or select number from node
+            const handleNodeClick = (nodeId) => {
+                if (isWon) return;
+
+                const value = board[nodeId];
+
+                if (selectedNumber !== null) {
+                    // Place selected number
+                    handleDrop(nodeId, selectedNumber);
+                } else if (value !== null) {
+                    // Select number from node to move it
+                    setSelectedNumber(value);
+                }
+            };
+
             const getUsedNumbers = () => board.filter(n => n !== null);
 
             return (
-                <div className="w-full max-w-4xl h-full flex flex-col md:flex-row items-center justify-center gap-8 p-4">
+                <div className="w-full max-w-4xl h-full flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8 p-2 md:p-4">
 
                     {/* Game Board */}
-                    <div className="relative w-[400px] h-[400px] md:w-[500px] md:h-[500px] select-none">
+                    <div className="relative w-[300px] h-[300px] sm:w-[400px] sm:h-[400px] md:w-[500px] md:h-[500px] select-none">
                         {/* Lines */}
                         <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
                             {CONNECTIONS.map((neighbors, fromId) =>
                                 neighbors.map(toId => {
-                                    if (fromId < toId) { // Draw each line once
+                                    if (fromId < toId) {
                                         const from = NODES[fromId];
                                         const to = NODES[toId];
                                         return (
@@ -281,7 +277,7 @@
                                                 x1={`${from.x}%`} y1={`${from.y}%`}
                                                 x2={`${to.x}%`} y2={`${to.y}%`}
                                                 stroke="#a3b1c6"
-                                                strokeWidth="4"
+                                                strokeWidth="3"
                                                 strokeLinecap="round"
                                             />
                                         );
@@ -296,14 +292,16 @@
                             const value = board[node.id];
                             const isHovered = hoveredNode?.id === node.id;
                             const isInvalidHover = isHovered && !hoveredNode.isValid;
+                            const isSelected = value === selectedNumber;
 
                             return (
                                 <div
                                     key={node.id}
-                                    className={`absolute flex items-center justify-center w-16 h-16 md:w-20 md:h-20 rounded-full text-2xl font-bold transition-all duration-200 outline-none
+                                    className={`absolute flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full text-xl sm:text-2xl font-bold transition-all duration-200 outline-none
                                         ${value ? 'neu-out text-gray-700' : 'neu-in text-gray-400'}
                                         ${isWon ? 'glow-green' : ''}
                                         ${isInvalidHover ? 'glow-red' : ''}
+                                        ${isSelected ? 'glow-blue' : ''}
                                         ${!isWon && value && !isInvalidHover ? 'border-2 border-transparent' : ''}
                                     `}
                                     style={{
@@ -314,6 +312,7 @@
                                     }}
                                     tabIndex={isWon ? -1 : 0}
                                     onKeyDown={(e) => handleKeyDown(e, node.id)}
+                                    onClick={() => handleNodeClick(node.id)}
                                     draggable={!!value && !isWon}
                                     onDragStart={(e) => {
                                         if (value && !isWon) {
@@ -342,11 +341,11 @@
                     </div>
 
                     {/* Controls & Pool */}
-                    <div className="flex flex-col items-center gap-8 z-10">
-                        <h1 className="text-3xl font-bold text-gray-700 tracking-wider">THE EIGHT NUMBERS</h1>
+                    <div className="flex flex-col items-center gap-4 md:gap-8 z-10">
+                        <h1 className="text-2xl md:text-3xl font-bold text-gray-700 tracking-wider">THE EIGHT NUMBERS</h1>
 
                         <div
-                            className="neu-out p-6 rounded-2xl flex flex-col items-center gap-4 border-2 border-gray-300"
+                            className="neu-out p-4 md:p-6 rounded-2xl flex flex-col items-center gap-3 md:gap-4 border-2 border-gray-300"
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => {
                                 e.preventDefault();
@@ -355,10 +354,11 @@
                                 }
                             }}
                         >
-                            <h2 className="text-gray-500 font-semibold">Drag Numbers</h2>
-                            <div className="grid grid-cols-4 gap-4">
+                            <h2 className="text-gray-500 font-semibold text-sm md:text-base">Drag/Tap Numbers</h2>
+                            <div className="grid grid-cols-4 gap-3 md:gap-4">
                                 {NUMBERS.map(num => {
                                     const isUsed = board.includes(num);
+                                    const isSelected = num === selectedNumber;
                                     return (
                                         <div
                                             key={num}
@@ -368,10 +368,12 @@
                                                 setDraggedNumber(null);
                                                 setHoveredNode(null);
                                             }}
-                                            className={`w-12 h-12 flex items-center justify-center rounded-full font-bold text-lg transition-all
+                                            onClick={() => handleNumberClick(num)}
+                                            className={`w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full font-bold text-base sm:text-lg transition-all
                                                 ${isUsed
                                                     ? 'neu-in text-gray-300 cursor-not-allowed'
-                                                    : 'neu-out text-gray-700 cursor-grab active:cursor-grabbing hover:-translate-y-1'}
+                                                    : 'neu-out text-gray-700 cursor-pointer active:scale-95 hover:-translate-y-1'}
+                                                ${isSelected ? 'glow-blue' : ''}
                                             `}
                                         >
                                             {num}
@@ -381,11 +383,12 @@
                             </div>
                         </div>
 
-                        <div className="text-gray-500 text-sm max-w-xs text-center">
+                        <div className="text-gray-500 text-xs md:text-sm max-w-xs text-center px-2">
                             <p>Rule: Connected nodes cannot have consecutive numbers (e.g., 1 cannot connect to 2).</p>
+                            <p className="mt-1 text-xs text-gray-400">Mobile: Tap number, then tap node</p>
                         </div>
 
-                        <div className="flex gap-4">
+                        <div className="flex gap-2 md:gap-4 flex-wrap justify-center">
                             <button
                                 onClick={() => {
                                     setBoard(Array(8).fill(null));
@@ -393,15 +396,16 @@
                                     setIsWon(false);
                                     setEndTime(null);
                                     setHistory([]);
+                                    setSelectedNumber(null);
                                 }}
-                                className="px-6 py-2 neu-btn rounded-full text-gray-600 font-semibold hover:text-red-500 active:scale-95"
+                                className="px-4 md:px-6 py-2 neu-btn rounded-full text-sm md:text-base text-gray-600 font-semibold hover:text-red-500 active:scale-95"
                             >
-                                Reset Board
+                                Reset
                             </button>
                             <button
                                 onClick={handleUndo}
                                 disabled={history.length === 0 || isWon}
-                                className={`px-6 py-2 neu-btn rounded-full font-semibold active:scale-95
+                                className={`px-4 md:px-6 py-2 neu-btn rounded-full text-sm md:text-base font-semibold active:scale-95
                                     ${history.length === 0 || isWon ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-blue-500'}
                                 `}
                             >
@@ -410,12 +414,12 @@
                         </div>
 
                         {isWon && (
-                            <div className="neu-out p-6 rounded-xl flex flex-col items-center gap-2 animate-bounce">
-                                <h3 className="text-2xl font-bold text-green-600">Congratulations!</h3>
-                                <p className="text-gray-600">Time Taken: {((endTime - startTime) / 1000).toFixed(1)}s</p>
+                            <div className="neu-out p-4 md:p-6 rounded-xl flex flex-col items-center gap-2 animate-bounce">
+                                <h3 className="text-xl md:text-2xl font-bold text-green-600">Congratulations!</h3>
+                                <p className="text-sm md:text-base text-gray-600">Time Taken: {((endTime - startTime) / 1000).toFixed(1)}s</p>
                                 <button
                                     onClick={() => window.location.reload()}
-                                    className="mt-2 px-6 py-2 neu-btn rounded-full text-gray-700 font-semibold hover:text-blue-500"
+                                    className="mt-2 px-4 md:px-6 py-2 neu-btn rounded-full text-sm md:text-base text-gray-700 font-semibold hover:text-blue-500"
                                 >
                                     Play Again
                                 </button>
