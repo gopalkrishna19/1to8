@@ -1,1 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
 
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Eight Numbers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            background-color: #e0e5ec;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            /* Prevent scrolling if possible */
+        }
+
+        /* Neumorphism Utilities */
+        .neu-out {
+            background: #e0e5ec;
+            box-shadow: 9px 9px 16px rgb(163, 177, 198, 0.6), -9px -9px 16px rgba(255, 255, 255, 0.5);
+        }
+
+        .neu-in {
+            background: #e0e5ec;
+            box-shadow: inset 6px 6px 10px 0 rgba(163, 177, 198, 0.7), inset -6px -6px 10px 0 rgba(255, 255, 255, 0.8);
+        }
+
+        .neu-btn {
+            background: #e0e5ec;
+            box-shadow: 6px 6px 10px 0 rgba(163, 177, 198, 0.7), -6px -6px 10px 0 rgba(255, 255, 255, 0.8);
+            transition: all 0.2s ease;
+        }
+
+        .neu-btn:active {
+            box-shadow: inset 4px 4px 8px 0 rgba(163, 177, 198, 0.7), inset -4px -4px 8px 0 rgba(255, 255, 255, 0.8);
+        }
+
+        .glow-green {
+            box-shadow: 0 0 15px #4ade80, inset 0 0 10px #4ade80;
+            border: 2px solid #4ade80;
+        }
+
+        .glow-red {
+            box-shadow: 0 0 15px #ef4444, inset 0 0 10px #ef4444;
+            border: 2px solid #ef4444;
+        }
+
+        /* Tooltip Animation */
+        @keyframes fadeInOut {
+            0% {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            10% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            90% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+
+        .tooltip-anim {
+            animation: fadeInOut 2s ease-in-out forwards;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root" class="h-screen w-screen flex flex-col items-center justify-center"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Configuration ---
+        // Graph Layout: 
+        // A(0)
+        // B(1) C(2) D(3)
+        // E(4) F(5) G(6)
+        // H(7)
+
+        // Coordinates (percent)
+        const NODES = [
+            { id: 0, x: 50, y: 10, label: 'A' },
+            { id: 1, x: 20, y: 35, label: 'B' },
+            { id: 2, x: 50, y: 35, label: 'C' },
+            { id: 3, x: 80, y: 35, label: 'D' },
+            { id: 4, x: 20, y: 65, label: 'E' },
+            { id: 5, x: 50, y: 65, label: 'F' },
+            { id: 6, x: 80, y: 65, label: 'G' },
+            { id: 7, x: 50, y: 90, label: 'H' },
+        ];
+
+        // Adjacency List (Based on "Two central nodes connected to 6 others" hypothesis)
+        // 0(A) connects to: 1(B), 2(C), 3(D)
+        // 1(B) connects to: 0(A), 2(C), 4(E), 5(F)
+        // 2(C) connects to: 0(A), 1(B), 3(D), 4(E), 5(F), 6(G)  <-- Central 1
+        // 3(D) connects to: 0(A), 2(C), 5(F), 6(G)
+        // 4(E) connects to: 1(B), 2(C), 5(F), 7(H)
+        // 5(F) connects to: 1(B), 2(C), 3(D), 4(E), 6(G), 7(H)  <-- Central 2
+        // 6(G) connects to: 2(C), 3(D), 5(F), 7(H)
+        // 7(H) connects to: 4(E), 5(F), 6(G)
+
+        const CONNECTIONS = [
+            [1, 2, 3],          // 0
+            [0, 2, 4, 5],       // 1
+            [0, 1, 3, 4, 5, 6], // 2
+            [0, 2, 5, 6],       // 3
+            [1, 2, 5, 7],       // 4
+            [1, 2, 3, 4, 6, 7], // 5
+            [2, 3, 5, 7],       // 6
+            [4, 5, 6]           // 7
+        ];
+
+        const NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+        function App() {
+            const [board, setBoard] = useState(Array(8).fill(null)); // nodeId -> number
+            const [availableNumbers, setAvailableNumbers] = useState(NUMBERS);
+            const [startTime, setStartTime] = useState(null);
+            const [endTime, setEndTime] = useState(null);
+            const [isWon, setIsWon] = useState(false);
+            const [tooltip, setTooltip] = useState({ show: false, text: '', x: 0, y: 0 });
+            const [draggedNumber, setDraggedNumber] = useState(null);
+            const [hoveredNode, setHoveredNode] = useState(null); // { id, isValid }
+            const [history, setHistory] = useState([]);
+
+            useEffect(() => {
+                setStartTime(Date.now());
+            }, []);
+
+            useEffect(() => {
+                if (board.every(n => n !== null)) {
+                    checkWin();
+                }
+            }, [board]);
+
+            const checkWin = () => {
+                // Double check validity (though we prevent invalid moves)
+                let valid = true;
+                for (let i = 0; i < 8; i++) {
+                    if (!checkNodeValidity(i, board[i], board)) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (valid) {
+                    setIsWon(true);
+                    setEndTime(Date.now());
+                }
+            };
+
+            const checkNodeValidity = (nodeId, number, currentBoard) => {
+                const neighbors = CONNECTIONS[nodeId];
+                for (let neighborId of neighbors) {
+                    const neighborVal = currentBoard[neighborId];
+                    if (neighborVal !== null) {
+                        if (Math.abs(neighborVal - number) === 1) {
+                            return { valid: false, conflict: neighborVal };
+                        }
+                    }
+                }
+                return { valid: true };
+            };
+
+            const addToHistory = () => {
+                setHistory(prev => [...prev, [...board]]);
+            };
+
+            const handleUndo = () => {
+                if (history.length === 0) return;
+                const prevBoard = history[history.length - 1];
+                setBoard(prevBoard);
+                setHistory(prev => prev.slice(0, -1));
+            };
+
+            const handleDrop = (nodeId, number) => {
+                const check = checkNodeValidity(nodeId, number, board);
+                if (check.valid) {
+                    addToHistory();
+                    const newBoard = [...board];
+
+                    // If number is moved from another node, clear previous position
+                    const existingIdx = newBoard.indexOf(number);
+                    if (existingIdx !== -1) {
+                        newBoard[existingIdx] = null;
+                    }
+
+                    newBoard[nodeId] = number;
+                    setBoard(newBoard);
+                } else {
+                    // Should not happen via drop if we prevent it visually, but good safety
+                }
+                setHoveredNode(null);
+            };
+
+            const handleReturnToPool = (number) => {
+                const idx = board.indexOf(number);
+                if (idx !== -1) {
+                    addToHistory();
+                    const newBoard = [...board];
+                    newBoard[idx] = null;
+                    setBoard(newBoard);
+                }
+            };
+
+            const handleKeyDown = (e, nodeId) => {
+                if (isWon) return;
+
+                const key = parseInt(e.key);
+                if (NUMBERS.includes(key)) {
+                    // Check if number is already used elsewhere?
+                    // Usually in these games, each number is used once.
+                    // If used elsewhere, maybe move it here?
+                    // Let's assume unique numbers.
+                    if (board.includes(key) && board[nodeId] !== key) {
+                        // Number used elsewhere. 
+                        // Optional: Flash "Already used" or move it.
+                        // Let's just allow moving it for better UX.
+                    }
+
+                    const check = checkNodeValidity(nodeId, key, board);
+                    if (check.valid) {
+                        addToHistory();
+                        const newBoard = [...board];
+                        // Remove key from other position if exists
+                        const existingIdx = newBoard.indexOf(key);
+                        if (existingIdx !== -1) newBoard[existingIdx] = null;
+
+                        newBoard[nodeId] = key;
+                        setBoard(newBoard);
+                    } else {
+                        // Show tooltip
+                        const node = NODES[nodeId];
+                        // Calculate screen position for tooltip? 
+                        // Or just relative to the node.
+                        // We can use a fixed overlay or absolute pos.
+                        showTooltip(`Too close to ${check.conflict}!`, e.target.getBoundingClientRect());
+                    }
+                }
+            };
+
+            const showTooltip = (text, rect) => {
+                setTooltip({
+                    show: true,
+                    text,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top - 10
+                });
+                setTimeout(() => setTooltip({ ...tooltip, show: false }), 2000);
+            };
+
+            const getUsedNumbers = () => board.filter(n => n !== null);
+
+            return (
+                <div className="w-full max-w-4xl h-full flex flex-col md:flex-row items-center justify-center gap-8 p-4">
+
+                    {/* Game Board */}
+                    <div className="relative w-[400px] h-[400px] md:w-[500px] md:h-[500px] select-none">
+                        {/* Lines */}
+                        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
+                            {CONNECTIONS.map((neighbors, fromId) =>
+                                neighbors.map(toId => {
+                                    if (fromId < toId) { // Draw each line once
+                                        const from = NODES[fromId];
+                                        const to = NODES[toId];
+                                        return (
+                                            <line
+                                                key={`${fromId}-${toId}`}
+                                                x1={`${from.x}%`} y1={`${from.y}%`}
+                                                x2={`${to.x}%`} y2={`${to.y}%`}
+                                                stroke="#a3b1c6"
+                                                strokeWidth="4"
+                                                strokeLinecap="round"
+                                            />
+                                        );
+                                    }
+                                    return null;
+                                })
+                            )}
+                        </svg>
+
+                        {/* Nodes */}
+                        {NODES.map((node) => {
+                            const value = board[node.id];
+                            const isHovered = hoveredNode?.id === node.id;
+                            const isInvalidHover = isHovered && !hoveredNode.isValid;
+
+                            return (
+                                <div
+                                    key={node.id}
+                                    className={`absolute flex items-center justify-center w-16 h-16 md:w-20 md:h-20 rounded-full text-2xl font-bold transition-all duration-200 outline-none
+                                        ${value ? 'neu-out text-gray-700' : 'neu-in text-gray-400'}
+                                        ${isWon ? 'glow-green' : ''}
+                                        ${isInvalidHover ? 'glow-red' : ''}
+                                        ${!isWon && value && !isInvalidHover ? 'border-2 border-transparent' : ''}
+                                    `}
+                                    style={{
+                                        left: `${node.x}%`,
+                                        top: `${node.y}%`,
+                                        transform: 'translate(-50%, -50%)',
+                                        cursor: isWon ? 'default' : 'pointer'
+                                    }}
+                                    tabIndex={isWon ? -1 : 0}
+                                    onKeyDown={(e) => handleKeyDown(e, node.id)}
+                                    draggable={!!value && !isWon}
+                                    onDragStart={(e) => {
+                                        if (value && !isWon) {
+                                            setDraggedNumber(value);
+                                        }
+                                    }}
+                                    onDragOver={(e) => {
+                                        e.preventDefault();
+                                        if (draggedNumber && !isWon) {
+                                            const check = checkNodeValidity(node.id, draggedNumber, board);
+                                            setHoveredNode({ id: node.id, isValid: check.valid });
+                                        }
+                                    }}
+                                    onDragLeave={() => setHoveredNode(null)}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        if (draggedNumber && !isWon) {
+                                            handleDrop(node.id, draggedNumber);
+                                        }
+                                    }}
+                                >
+                                    {value}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Controls & Pool */}
+                    <div className="flex flex-col items-center gap-8 z-10">
+                        <h1 className="text-3xl font-bold text-gray-700 tracking-wider">THE EIGHT NUMBERS</h1>
+
+                        <div
+                            className="neu-out p-6 rounded-2xl flex flex-col items-center gap-4 border-2 border-gray-300"
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                                e.preventDefault();
+                                if (draggedNumber) {
+                                    handleReturnToPool(draggedNumber);
+                                }
+                            }}
+                        >
+                            <h2 className="text-gray-500 font-semibold">Drag Numbers</h2>
+                            <div className="grid grid-cols-4 gap-4">
+                                {NUMBERS.map(num => {
+                                    const isUsed = board.includes(num);
+                                    return (
+                                        <div
+                                            key={num}
+                                            draggable={!isUsed && !isWon}
+                                            onDragStart={() => setDraggedNumber(num)}
+                                            onDragEnd={() => {
+                                                setDraggedNumber(null);
+                                                setHoveredNode(null);
+                                            }}
+                                            className={`w-12 h-12 flex items-center justify-center rounded-full font-bold text-lg transition-all
+                                                ${isUsed
+                                                    ? 'neu-in text-gray-300 cursor-not-allowed'
+                                                    : 'neu-out text-gray-700 cursor-grab active:cursor-grabbing hover:-translate-y-1'}
+                                            `}
+                                        >
+                                            {num}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="text-gray-500 text-sm max-w-xs text-center">
+                            <p>Rule: Connected nodes cannot have consecutive numbers (e.g., 1 cannot connect to 2).</p>
+                        </div>
+
+                        <div className="flex gap-4">
+                            <button
+                                onClick={() => {
+                                    setBoard(Array(8).fill(null));
+                                    setStartTime(Date.now());
+                                    setIsWon(false);
+                                    setEndTime(null);
+                                    setHistory([]);
+                                }}
+                                className="px-6 py-2 neu-btn rounded-full text-gray-600 font-semibold hover:text-red-500 active:scale-95"
+                            >
+                                Reset Board
+                            </button>
+                            <button
+                                onClick={handleUndo}
+                                disabled={history.length === 0 || isWon}
+                                className={`px-6 py-2 neu-btn rounded-full font-semibold active:scale-95
+                                    ${history.length === 0 || isWon ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-blue-500'}
+                                `}
+                            >
+                                Undo
+                            </button>
+                        </div>
+
+                        {isWon && (
+                            <div className="neu-out p-6 rounded-xl flex flex-col items-center gap-2 animate-bounce">
+                                <h3 className="text-2xl font-bold text-green-600">Congratulations!</h3>
+                                <p className="text-gray-600">Time Taken: {((endTime - startTime) / 1000).toFixed(1)}s</p>
+                                <button
+                                    onClick={() => window.location.reload()}
+                                    className="mt-2 px-6 py-2 neu-btn rounded-full text-gray-700 font-semibold hover:text-blue-500"
+                                >
+                                    Play Again
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Tooltip */}
+                    {tooltip.show && (
+                        <div
+                            className="fixed z-50 px-4 py-2 bg-red-500 text-white text-sm font-bold rounded-lg shadow-lg pointer-events-none tooltip-anim"
+                            style={{
+                                left: tooltip.x,
+                                top: tooltip.y,
+                                transform: 'translate(-50%, -100%)'
+                            }}
+                        >
+                            {tooltip.text}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
